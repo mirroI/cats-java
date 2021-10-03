@@ -11,6 +11,7 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.RequiredArgsConstructor;
+import reactor.core.publisher.MonoSink;
 
 import java.util.Map;
 
@@ -29,7 +30,11 @@ public class ChannelReadHandler extends ChannelInboundHandlerAdapter {
             InputHeader header = (InputHeader) response.getHeader();
 
             Request request = waitingMap.get(header.getMessageId());
-            request.getMonoSink().success(response);
+            MonoSink<Object> monoSink = request.getMonoSink();
+
+            if (monoSink != null) {
+                request.getMonoSink().success(response);
+            }
         }
     }
 }

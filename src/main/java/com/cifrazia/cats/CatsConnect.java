@@ -2,33 +2,27 @@ package com.cifrazia.cats;
 
 import com.cifrazia.cats.api.primitives.UnsignedShort;
 import com.cifrazia.cats.enumiration.CatsStatus;
-import com.cifrazia.cats.enumiration.CompressionType;
 import com.cifrazia.cats.enumiration.DataType;
 import com.cifrazia.cats.enumiration.HeaderType;
 import com.cifrazia.cats.handler.*;
-import com.cifrazia.cats.model.header.AbstractHeader;
-import com.cifrazia.cats.model.header.BasicHeader;
-import com.cifrazia.cats.model.header.InputHeader;
-import com.cifrazia.cats.model.header.StreamingHeader;
+import com.cifrazia.cats.model.header.*;
 import com.cifrazia.cats.model.request.AbstractRequest;
-import com.cifrazia.cats.model.request.BasicRequest;
 import com.cifrazia.cats.model.request.Request;
-import com.cifrazia.cats.model.response.BasicResponse;
+import com.cifrazia.cats.model.request.SystemRequest;
 import com.cifrazia.cats.model.response.Response;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.google.common.primitives.UnsignedInteger;
 import io.netty.bootstrap.Bootstrap;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import lombok.Builder;
+import lombok.Getter;
 import lombok.SneakyThrows;
 import reactor.core.publisher.Mono;
 
 import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayDeque;
@@ -50,6 +44,7 @@ public class CatsConnect {
     private static final long PING_AT = 90000l;
 
     private ChannelFuture channelFuture;
+    @Getter
     private CatsStatus status = CatsStatus.DISCONNECTED;
 
     private final UnsignedInteger apiVersion;
@@ -57,8 +52,8 @@ public class CatsConnect {
     private String ip;
     private int port;
 
-    private Runnable connectHandler;
-    private Runnable reconnectHandler;
+    private Runnable connectEvent;
+    private Runnable reconnectEvent;
 
     private long lastWritingAt;
 
@@ -82,15 +77,14 @@ public class CatsConnect {
     private long requestBytesSent = 0;
 
     @Builder
-    public CatsConnect(UnsignedInteger apiVersion, String secretKey, String ip, int port, Runnable connectHandler, Runnable reconnectHandler)
-            throws InterruptedException {
+    public CatsConnect(UnsignedInteger apiVersion, String secretKey, String ip, int port, Runnable connectEvent, Runnable reconnectEvent) {
         this.apiVersion = apiVersion;
         this.secretKey = secretKey;
         this.ip = ip;
         this.port = port;
 
-        this.connectHandler = connectHandler;
-        this.reconnectHandler = reconnectHandler;
+        this.connectEvent = connectEvent;
+        this.reconnectEvent = reconnectEvent;
 
         this.clientBootstrap = new Bootstrap();
         this.eventLoopGroup = new NioEventLoopGroup();
@@ -145,15 +139,19 @@ public class CatsConnect {
                 .channelReadHandler(this.channelReadHandler)
                 .channelAuthenticate(() -> {
                     if (CatsConnect.this.status == CatsStatus.RECONNECTION) {
-                        this.reconnectHandler.run();
+                        if (this.reconnectEvent != null) {
+                            this.reconnectEvent.run();
+                        }
                     } else {
-                        this.connectHandler.run();
+                        if (this.connectEvent != null) {
+                            this.connectEvent.run();
+                        }
                     }
 
                     CatsConnect.this.status = CatsStatus.CONNECTED;
 
                     lastWritingAt = LocalDateTime.now().toInstant(ZoneOffset.UTC).toEpochMilli();
-                    this.scheduledFuture = executorService.scheduleAtFixedRate(() -> writeNextQueue(), 50, 50, TimeUnit.MILLISECONDS);
+                    this.scheduledFuture = executorService.scheduleAtFixedRate(() -> writeNextMessage(), 50, 50, TimeUnit.MILLISECONDS);
                 })
                 .build();
 
@@ -197,15 +195,15 @@ public class CatsConnect {
         return mono;
     }
 
-    protected void ping() {
-//        writeQueue.add(new)
+    private void ping() {
+        writeQueue.add(new SystemRequest(new PingPongHeader()));
     }
 
     public LocalDateTime getServerTime() {
         return readStatementHandler.getServerTime();
     }
 
-    private void writeNextQueue() {
+    private void writeNextMessage() {
         Channel channel = channelFuture.channel();
 
         if (channelFuture.channel().isActive() && this.status == CatsStatus.CONNECTED) {
@@ -233,7 +231,7 @@ public class CatsConnect {
                             break;
                         }
                         case PING_PONG: {
-                            ((BasicHeader) header).setTime(getServerTime().toInstant(ZoneOffset.UTC).toEpochMilli());
+                            ((PingPongHeader) header).setTime(getServerTime().toInstant(ZoneOffset.UTC).toEpochMilli());
                             break;
                         }
                     }
@@ -253,31 +251,29 @@ public class CatsConnect {
         this.request = request;
 
         switch (request.getHeader().getHeaderType()) {
-            case BASIC: {
+            case BASIC:
                 this.requestBytesSent = -19;
                 break;
-            }
-            case STREAM: {
+            case STREAM:
                 this.requestBytesSent = -15;
                 break;
-            }
             case CHILDREN:
-            case PING_PONG: {
                 this.requestBytesSent = -9;
                 break;
-            }
-            case SPEED_LIMIT: {
+            case SPEED_LIMIT:
                 this.requestBytesSent = -5;
                 break;
-            }
-            case CANCEL_INPUT: {
+            case CANCEL_INPUT:
                 this.requestBytesSent = -3;
                 break;
-            }
+            case PING_PONG:
+                this.requestBytesSent = -9;
+                break;
         }
     }
 
     private void bytesWritten() {
+        lastWritingAt = LocalDateTime.now().toInstant(ZoneOffset.UTC).toEpochMilli();
         HeaderType headerType = this.request.getHeader().getHeaderType();
 
         if (headerType == HeaderType.BASIC || headerType == HeaderType.CHILDREN) {

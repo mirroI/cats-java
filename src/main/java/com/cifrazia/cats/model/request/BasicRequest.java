@@ -29,7 +29,7 @@ public class BasicRequest extends Request {
         ((InputHeader) getHeader()).setDataLength(
                 UnsignedInteger.valueOf(messageHeaderByteBuf.readableBytes() + MESSAGE_HEADER_SPLITTER.length + data.readableBytes()));
 
-        ByteBuf headerByteBuf = getHeader().toByteBuf();
+        ByteBuf headerByteBuf = super.getHeader().toByteBuf();
         ByteBuf byteBuf = Unpooled.wrappedBuffer(headerByteBuf, messageHeaderByteBuf, Unpooled.wrappedBuffer(MESSAGE_HEADER_SPLITTER), this.data);
 
         return byteBuf;

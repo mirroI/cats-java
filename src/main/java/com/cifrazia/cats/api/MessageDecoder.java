@@ -1,15 +1,13 @@
 package com.cifrazia.cats.api;
 
+import com.cifrazia.cats.CatsConnect;
 import com.cifrazia.cats.api.buffers.CatsByteBuf;
 import com.cifrazia.cats.api.buffers.MessageByteBuf;
 import com.cifrazia.cats.enumiration.DataType;
 import com.cifrazia.cats.enumiration.HeaderType;
+import com.cifrazia.cats.model.header.*;
 import com.cifrazia.cats.model.response.AbstractResponse;
 import com.cifrazia.cats.model.response.BasicResponse;
-import com.cifrazia.cats.model.header.AbstractHeader;
-import com.cifrazia.cats.model.header.BasicHeader;
-import com.cifrazia.cats.model.header.Header;
-import com.cifrazia.cats.model.header.InputHeader;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.google.common.primitives.Bytes;
 import com.google.common.primitives.UnsignedInteger;
@@ -17,6 +15,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.ByteToMessageDecoder;
+import lombok.extern.log4j.Log4j2;
 
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
@@ -26,6 +25,7 @@ import java.util.Map;
 import static com.cifrazia.cats.api.jackson.SerDes.OBJECT_MAPPER;
 import static com.cifrazia.cats.model.AbstractMessage.MESSAGE_HEADER_SPLITTER;
 
+@Log4j2
 public class MessageDecoder extends ByteToMessageDecoder {
     private HeaderType headerType = HeaderType.EMPTY;
     private AbstractHeader header = null;
@@ -90,10 +90,11 @@ public class MessageDecoder extends ByteToMessageDecoder {
 
     private boolean readHeader(ByteBuf byteBuf) {
         switch (headerType) {
-            case BASIC: {
+            case BASIC:
                 this.header = new BasicHeader(headerType, byteBuf);
                 break;
-            }
+            case PING_PONG:
+                this.header = new PingPongHeader(headerType, byteBuf);
         }
 
         return header != null;
@@ -158,6 +159,9 @@ public class MessageDecoder extends ByteToMessageDecoder {
 
                 response = new BasicResponse(header, new LinkedHashMap<>(this.messageHeader), byteBuf);
             }
+        } else if (this.headerType == HeaderType.PING_PONG) {
+            PingPongHeader header = (PingPongHeader)  this.header;
+            log.info(header.getTime());
         }
 
         this.headerType = HeaderType.EMPTY;
